@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+config.json
+
+# Arduino / PlatformIO
+.pio/
+build/
+*.hex
+*.elf
+
+# Databases
+*.db
+*.sqlite3
+
+# Operating Systems
+.DS_Store
+Thumbs.db

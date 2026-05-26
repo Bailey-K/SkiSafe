@@ -1,0 +1,7 @@
+{
+    "SMTP_SERVER": "smtp.gmail.com",
+    "SMTP_PORT": 587,
+    "SENDER_EMAIL": "your-system-email@gmail.com",
+    "SMTP_PASSWORD": "your-application-specific-password",
+    "EMERGENCY_CONTACTS": ["contact1@example.com", "contact2@example.com"]
+}
