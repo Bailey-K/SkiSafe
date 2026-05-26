@@ -19,3 +19,7 @@ build/
 # Operating Systems
 .DS_Store
 Thumbs.db
+
+# Local Automation Shortcuts
+launch.bat
+*.bat
