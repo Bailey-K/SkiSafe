@@ -5,38 +5,31 @@ from machine import I2C, ADC, Pin, UART
 import math
 import ujson
 
-# LoRa setup
 lora = LoRa(mode=LoRa.LORA, region=LoRa.AU915, frequency=915000000, bandwidth=LoRa.BW_125KHZ, sf=7)
 time.sleep(2)
 s = socket.socket(socket.AF_LORA, socket.SOCK_RAW)
 s.setblocking(True)
 time.sleep(1)
 
-# I2C
 i2c = I2C(0, pins=('P21', 'P22'))
 i2c.writeto_mem(0x68, 0x6B, bytes([0]))
 time.sleep(0.1)
 i2c.writeto(0x23, bytes([0x10]))
 time.sleep(0.2)
 
-# GPS
-uart = UART(1, baudrate=9600, pins=('P4', 'P3'))
+uart = UART(1, baudrate=9600, pins=('P19', 'P20'))
 
-# NTC
 adc = ADC()
 ntc = adc.channel(pin='P14', attn=ADC.ATTN_11DB)
 
-# Outputs
 buzzer = Pin('P9', mode=Pin.OUT)
 red = Pin('P12', mode=Pin.OUT)
 yellow = Pin('P11', mode=Pin.OUT)
 green = Pin('P10', mode=Pin.OUT)
 buzzer(0); red(0); yellow(0); green(0)
 
-# Button
 button = Pin('P8', mode=Pin.IN, pull=Pin.PULL_UP)
 
-# Averaging buffers
 light_buf = []
 temp_buf = []
 lat_buf = []
@@ -121,7 +114,7 @@ def update_leds(skin_temp):
     else:
         red(0); yellow(0); green(1)
 
-print('Wearable v2 starting...')
+print('Wearable v3 starting...')
 count = 0
 
 while True:

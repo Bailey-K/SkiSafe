@@ -19,8 +19,8 @@ time.sleep(0.1)
 i2c.writeto(0x23, bytes([0x10]))
 time.sleep(0.2)
 
-# GPS
-uart = UART(1, baudrate=9600, pins=('P4', 'P3'))
+# GPS — confirmed working pins
+uart = UART(1, baudrate=9600, pins=('P19', 'P20'))
 
 # NTC
 adc = ADC()
@@ -43,6 +43,12 @@ lat_buf = []
 lon_buf = []
 alt_buf = []
 speed_buf = []
+
+# GPS state — persists between loops
+gps_lat = None
+gps_lon = None
+gps_alt = None
+gps_speed = None
 
 def averaged(buf, new_val, size=5):
     if new_val is not None:
@@ -86,32 +92,35 @@ def read_skin_temp():
     except:
         return 0
 
-def read_gps():
-    lat, lon, alt, speed = None, None, None, None
-    deadline = time.time() + 1
-    while time.time() < deadline:
-        if uart.any():
-            line = uart.readline()
-            if line:
-                try:
-                    decoded = line.decode('utf-8').strip()
-                    if decoded.startswith('$GNGGA') or decoded.startswith('$GPGGA'):
-                        parts = decoded.split(',')
-                        if len(parts) > 9 and parts[2] and parts[4]:
-                            raw_lat = float(parts[2])
-                            raw_lon = float(parts[4])
-                            lat = round(int(raw_lat/100) + (raw_lat % 100)/60, 6)
-                            lon = round(int(raw_lon/100) + (raw_lon % 100)/60, 6)
-                            if parts[3] == 'S': lat = -lat
-                            if parts[5] == 'W': lon = -lon
-                            if parts[9]: alt = round(float(parts[9]), 1)
-                    if decoded.startswith('$GNRMC') or decoded.startswith('$GPRMC'):
-                        parts = decoded.split(',')
-                        if len(parts) > 7 and parts[7]:
-                            speed = round(float(parts[7]) * 1.852, 2)
-                except:
-                    pass
-    return averaged(lat_buf, lat, 5), averaged(lon_buf, lon, 5), averaged(alt_buf, alt, 5), averaged(speed_buf, speed, 3)
+def update_gps():
+    global gps_lat, gps_lon, gps_alt, gps_speed
+    # Read all available NMEA sentences without blocking
+    while uart.any():
+        line = uart.readline()
+        if not line:
+            continue
+        try:
+            decoded = line.decode('utf-8').strip()
+            if decoded.startswith('$GNGGA') or decoded.startswith('$GPGGA'):
+                parts = decoded.split(',')
+                if len(parts) > 9 and parts[2] and parts[4]:
+                    raw_lat = float(parts[2])
+                    raw_lon = float(parts[4])
+                    lat = round(int(raw_lat/100) + (raw_lat % 100)/60, 6)
+                    lon = round(int(raw_lon/100) + (raw_lon % 100)/60, 6)
+                    if parts[3] == 'S': lat = -lat
+                    if parts[5] == 'W': lon = -lon
+                    gps_lat = averaged(lat_buf, lat, 5)
+                    gps_lon = averaged(lon_buf, lon, 5)
+                    if parts[9]:
+                        gps_alt = averaged(alt_buf, round(float(parts[9]), 1), 5)
+            elif decoded.startswith('$GNRMC') or decoded.startswith('$GPRMC'):
+                parts = decoded.split(',')
+                if len(parts) > 7 and parts[7]:
+                    spd = round(float(parts[7]) * 1.852, 2)
+                    gps_speed = averaged(speed_buf, spd, 3)
+        except:
+            pass
 
 def update_leds(skin_temp):
     if skin_temp < 10:
@@ -121,14 +130,16 @@ def update_leds(skin_temp):
     else:
         red(0); yellow(0); green(1)
 
-print('Wearable v2 starting...')
+print('Wearable v4 starting...')
 count = 0
 
 while True:
+    # Drain GPS buffer every loop
+    update_gps()
+
     ax, ay, az = read_mpu()
     light = read_light()
     skin_temp = read_skin_temp()
-    lat, lon, alt, speed = read_gps()
 
     update_leds(skin_temp)
 
@@ -140,10 +151,10 @@ while True:
         'ax': ax,
         'ay': ay,
         'az': az,
-        'lat': lat,
-        'lon': lon,
-        'alt': alt,
-        'speed': speed,
+        'lat': gps_lat,
+        'lon': gps_lon,
+        'alt': gps_alt,
+        'speed': gps_speed,
         'alert': 0
     }
 
