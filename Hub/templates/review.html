@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkiSafe — Post-Session Review</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #eef2f7; --surface: #fff; --surface-2: #f7fafc; --border: #e2e8f0;
+  --text: #1a202c; --text-muted: #718096;
+  --ok: #2f855a; --ok-bg: #f0fff4; --ok-border: #9ae6b4;
+  --warn: #b7791f; --warn-bg: #fffff0; --warn-border: #f6e05e;
+  --alert: #c05621; --alert-bg: #fff8f0; --alert-border: #fbd38d;
+  --sos: #c53030; --sos-bg: #fff5f5; --sos-border: #feb2b2;
+  --blue: #2b6cb0; --blue-light: #ebf8ff;
+  --accent: #1a365d; --radius: 10px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* ── Header ── */
+.header { background: var(--accent); color: white; padding: 0 20px; height: 54px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 10px rgba(0,0,0,0.25); position: sticky; top: 0; z-index: 100; }
+.header-left { display: flex; align-items: center; gap: 14px; }
+.logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.logo em { font-style: normal; color: #63b3ed; }
+.conn-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; display: flex; align-items: center; gap: 5px; background: rgba(56,161,105,0.25); color: #9ae6b4; border: 1px solid rgba(56,161,105,0.4); }
+.conn-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: #68d391; animation: live-pulse 2s infinite; }
+@keyframes live-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(104,211,145,0.6)}50%{box-shadow:0 0 0 4px rgba(104,211,145,0)} }
+.header-time { font-size: 13px; color: #90cdf4; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ── Nav ── */
+.nav { background: #2d3748; display: flex; padding: 0 20px; }
+.nav-tab { padding: 11px 18px; font-size: 13px; font-weight: 600; color: #a0aec0; text-decoration: none; border-bottom: 3px solid transparent; display: flex; align-items: center; gap: 6px; transition: color 0.15s; }
+.nav-tab:hover { color: #e2e8f0; }
+.nav-tab.active { color: #63b3ed; border-bottom-color: #63b3ed; }
+
+/* ── Layout ── */
+.page { padding: 18px 20px; max-width: 1060px; margin: 0 auto; }
+
+/* ── Session selector ── */
+.session-bar { background: var(--surface); border-radius: var(--radius); padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-bottom: 14px; box-shadow: var(--shadow); font-size: 12px; }
+.session-bar label { color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; white-space: nowrap; }
+.session-bar select { flex:1; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; background: var(--surface-2); color: var(--text); cursor: pointer; }
+.session-bar select:focus { outline: 2px solid #63b3ed; outline-offset: 1px; border-color: transparent; }
+.reload-btn { padding: 5px 14px; background: var(--blue); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.reload-btn:hover { background: #2c5282; }
+
+/* ── Stats ── */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+@media (max-width: 600px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+.stat-card { background: var(--surface); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); text-align: center; }
+.stat-val { font-size: 28px; font-weight: 800; color: var(--blue); font-variant-numeric: tabular-nums; }
+.stat-unit { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+.stat-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin-top: 4px; }
+
+/* ── Charts ── */
+.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+@media (max-width: 600px) { .charts-row { grid-template-columns: 1fr; } }
+.chart-card { background: var(--surface); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+.chart-card-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.chart-wrap { position: relative; height: 170px; }
+
+/* ── GPS track ── */
+.gps-card { background: var(--surface); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin-bottom: 14px; }
+#gpsCanvas { width: 100%; height: 220px; border-radius: 8px; display: block; background: #ddeef5; }
+.gps-legend { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; align-items: center; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.no-gps-msg { text-align: center; color: var(--text-muted); padding: 40px 0; font-size: 13px; font-style: italic; }
+
+/* ── Alert log ── */
+.section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 8px; }
+.alert-table { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.alert-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.alert-row:last-child { border-bottom: none; }
+.alert-row.empty { color: var(--text-muted); justify-content: center; padding: 18px; font-style: italic; }
+.alert-pip { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.pip-1 { background: var(--warn); } .pip-2 { background: var(--alert); } .pip-3 { background: var(--sos); }
+.alert-ts { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 72px; }
+.alert-msg { flex: 1; }
+.alert-ack { font-size: 10px; color: var(--ok); font-weight: 700; white-space: nowrap; }
+.alert-lvl-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.lvl-1 { background: var(--warn-bg); color: var(--warn); }
+.lvl-2 { background: var(--alert-bg); color: var(--alert); }
+.lvl-3 { background: var(--sos-bg); color: var(--sos); }
+
+/* ── Loading ── */
+.loading { text-align: center; padding: 40px; color: var(--text-muted); font-size: 13px; }
+.loading-spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo">Ski<em>Safe</em></div>
+    <div class="conn-badge"><div class="dot"></div><span>LIVE</span></div>
+  </div>
+  <div class="header-time" id="headerTime">--:--:--</div>
+</div>
+
+<!-- Nav -->
+<nav class="nav">
+  <a class="nav-tab" href="/">⬤ Live View</a>
+  <a class="nav-tab active" href="/review">📊 Post-Session Review</a>
+</nav>
+
+<!-- Page -->
+<div class="page">
+
+  <!-- Session selector -->
+  <div class="session-bar">
+    <label>Session</label>
+    <select id="sessionSelect" onchange="loadSession(this.value)">
+      <option value="current">Current / Most Recent</option>
+    </select>
+    <button class="reload-btn" onclick="reload()">↺ Refresh</button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-val" id="rev-dur">--<span class="stat-unit"> min</span></div>
+      <div class="stat-label">Duration</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" id="rev-alerts">--</div>
+      <div class="stat-label">Total Alerts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" id="rev-speed">--<span class="stat-unit"> km/h</span></div>
+      <div class="stat-label">Peak Speed</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" id="rev-temp">--<span class="stat-unit">°C</span></div>
+      <div class="stat-label">Min Skin Temp</div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="chart-card-title"><span style="color:#e53e3e">●</span> Skin Temperature (°C)</div>
+      <div class="chart-wrap"><canvas id="tempChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-title"><span style="color:#3182ce">●</span> Speed (km/h)</div>
+      <div class="chart-wrap"><canvas id="speedChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- GPS track -->
+  <div class="gps-card">
+    <div class="chart-card-title">📍 GPS Track</div>
+    <canvas id="gpsCanvas"></canvas>
+    <div class="gps-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#3182ce"></div>Start</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e53e3e"></div>End</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#dd6b20"></div>Alert</div>
+      <div style="margin-left:auto;font-size:10px;color:#a0aec0">Track colour = altitude (blue=low → green=high)</div>
+    </div>
+  </div>
+
+  <!-- Alert log -->
+  <div class="section-title">Alert History</div>
+  <div class="alert-table" id="alertLog">
+    <div class="loading"><div class="loading-spinner"></div><div>Loading…</div></div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+let tChart = null, sChart = null;
+
+// ═══════════════════════════════════════════════════════
+// CLOCK
+// ═══════════════════════════════════════════════════════
+function tickClock() {
+  document.getElementById('headerTime').textContent =
+    new Date().toLocaleTimeString('en-AU', {hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ═══════════════════════════════════════════════════════
+// LOAD ON START
+// ═══════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+  loadSession('current');
+});
+
+function reload() {
+  const sel = document.getElementById('sessionSelect');
+  loadSession(sel.value);
+}
+
+async function loadSession(sessionId) {
+  try {
+    const [hr, sr, ar] = await Promise.all([
+      fetch('/api/history'),
+      fetch('/api/session'),
+      fetch('/api/alerts')
+    ]);
+
+    const history = hr.ok ? await hr.json() : [];
+    const session = sr.ok ? await sr.json() : {};
+    const alerts  = ar.ok ? await ar.json() : [];
+
+    renderStats(history, session);
+    renderCharts(history);
+    renderGpsTrack(history, alerts);
+    renderAlertLog(alerts);
+  } catch (e) {
+    console.error('Failed to load session data:', e);
+    document.getElementById('alertLog').innerHTML =
+      '<div class="alert-row empty">Failed to load data — is reader.py running?</div>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════════════════
+function renderStats(history, session) {
+  // Session endpoint provides pre-computed stats; fall back to computing from history.
+  const dur      = session.duration_min ?? session.duration ?? computeDuration(history);
+  const alertCnt = session.alert_count  ?? session.alerts   ?? '—';
+  const maxSpd   = session.max_speed    ?? (history.length ? Math.max(...history.map(r => r.speed || 0)).toFixed(1) : '--');
+  const minTemp  = session.min_temp     ?? (history.length ? Math.min(...history.map(r => r.skin_temp ?? 99)).toFixed(1) : '--');
+
+  document.getElementById('rev-dur').innerHTML    = dur + '<span class="stat-unit"> min</span>';
+  document.getElementById('rev-alerts').textContent = alertCnt;
+  document.getElementById('rev-speed').innerHTML  = maxSpd + '<span class="stat-unit"> km/h</span>';
+  document.getElementById('rev-temp').innerHTML   = minTemp + '<span class="stat-unit">°C</span>';
+}
+
+function computeDuration(history) {
+  if (!history || history.length < 2) return '--';
+  // Estimate: assume one reading every ~15s
+  return Math.round(history.length * 15 / 60);
+}
+
+// ═══════════════════════════════════════════════════════
+// CHARTS
+// ═══════════════════════════════════════════════════════
+function renderCharts(history) {
+  if (!history || history.length === 0) return;
+
+  const N      = Math.max(1, Math.floor(history.length / 10));
+  const labels = history.map((r, i) => i % N === 0 ? (r.ts || r.timestamp || '') : '');
+  const temps  = history.map(r => r.skin_temp  ?? null);
+  const speeds = history.map(r => r.speed      ?? null);
+
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { font: { size: 9 }, maxRotation: 0, color: '#a0aec0' }, grid: { color: '#f0f4f8' } },
+      y: { ticks: { font: { size: 10 }, color: '#a0aec0' }, grid: { color: '#f0f4f8' } }
+    },
+    animation: { duration: 400 }
+  };
+
+  if (tChart) tChart.destroy();
+  tChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: temps, borderColor: '#e53e3e',
+        backgroundColor: 'rgba(229,62,62,0.08)',
+        fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2,
+        spanGaps: true
+      }]
+    },
+    options: {
+      ...baseOpts,
+      scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, suggestedMin: 10, suggestedMax: 35 } }
+    }
+  });
+
+  if (sChart) sChart.destroy();
+  sChart = new Chart(document.getElementById('speedChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: speeds, borderColor: '#3182ce',
+        backgroundColor: 'rgba(49,130,206,0.08)',
+        fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2,
+        spanGaps: true
+      }]
+    },
+    options: {
+      ...baseOpts,
+      scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, suggestedMin: 0 } }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// GPS TRACK
+// ═══════════════════════════════════════════════════════
+function renderGpsTrack(history, alerts) {
+  const canvas = document.getElementById('gpsCanvas');
+  // Filter to valid GPS points (lat/lon != 0)
+  const pts = (history || []).filter(r => {
+    const lat = r.lat, lon = r.lon;
+    return lat && lat !== 0 && lon && lon !== 0;
+  });
+
+  if (pts.length < 2) {
+    const ctx = canvas.getContext('2d');
+    canvas.width  = canvas.offsetWidth  || 600;
+    canvas.height = canvas.offsetHeight || 220;
+    ctx.fillStyle = '#ddeef5';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '13px -apple-system,sans-serif';
+    ctx.fillStyle = '#718096';
+    ctx.textAlign = 'center';
+    ctx.fillText('No GPS data recorded for this session', canvas.width/2, canvas.height/2);
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = canvas.offsetWidth  * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+
+  const lats = pts.map(p => p.lat);
+  const lons = pts.map(p => p.lon);
+  const alts = pts.map(p => p.altitude || p.alt || 0);
+  const pad = 30;
+
+  const minLat = Math.min(...lats), ranLat = Math.max(...lats) - minLat || 0.001;
+  const minLon = Math.min(...lons), ranLon = Math.max(...lons) - minLon || 0.001;
+  const minAlt = Math.min(...alts), ranAlt = Math.max(...alts) - minAlt || 1;
+
+  const tx  = lon => pad + (lon - minLon) / ranLon * (W - 2*pad);
+  const ty  = lat => (H - pad) - (lat - minLat) / ranLat * (H - 2*pad);
+  const col = alt => {
+    const t = (alt - minAlt) / ranAlt;
+    return `rgb(${Math.round(49+t*3)},${Math.round(130+t*38)},${Math.round(206-t*123)})`;
+  };
+
+  // Background + grid
+  ctx.fillStyle = '#ddeef5';
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#c8dfe8'; ctx.lineWidth = 0.5;
+  for (let i = 1; i < 5; i++) {
+    const x = pad + (W-2*pad)*i/5, y = pad + (H-2*pad)*i/5;
+    ctx.beginPath(); ctx.moveTo(x,pad); ctx.lineTo(x,H-pad); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke();
+  }
+
+  // Shadow
+  ctx.beginPath();
+  ctx.moveTo(tx(pts[0].lon), ty(pts[0].lat));
+  pts.forEach(p => ctx.lineTo(tx(p.lon), ty(p.lat)));
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+
+  // Coloured track
+  for (let i = 1; i < pts.length; i++) {
+    ctx.beginPath();
+    ctx.moveTo(tx(pts[i-1].lon), ty(pts[i-1].lat));
+    ctx.lineTo(tx(pts[i].lon),   ty(pts[i].lat));
+    ctx.strokeStyle = col(alts[i]);
+    ctx.lineWidth = 3; ctx.stroke();
+  }
+
+  // Alert markers — use lat/lon from alert_log if available, otherwise place on track
+  if (alerts) {
+    alerts.filter(a => (a.level || a.alert_level || 0) >= 2).forEach((a, idx) => {
+      let apx, apy;
+      const aLat = a.lat, aLon = a.lon;
+      if (aLat && aLat !== 0 && aLon && aLon !== 0) {
+        apx = tx(aLon); apy = ty(aLat);
+      } else {
+        const i = Math.floor((0.3 + idx * 0.25) * (pts.length - 1));
+        apx = tx(pts[i].lon); apy = ty(pts[i].lat);
+      }
+      ctx.beginPath(); ctx.arc(apx, apy, 6, 0, Math.PI*2);
+      ctx.fillStyle = '#dd6b20'; ctx.fill();
+      ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+    });
+  }
+
+  // Start / end dots
+  const dot = (lon, lat, colour) => {
+    ctx.beginPath(); ctx.arc(tx(lon), ty(lat), 7, 0, Math.PI*2);
+    ctx.fillStyle = colour; ctx.fill();
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5; ctx.stroke();
+  };
+  dot(pts[0].lon, pts[0].lat, '#3182ce');
+  dot(pts[pts.length-1].lon, pts[pts.length-1].lat, '#e53e3e');
+}
+
+// ═══════════════════════════════════════════════════════
+// ALERT LOG
+// ═══════════════════════════════════════════════════════
+function renderAlertLog(alerts) {
+  const el = document.getElementById('alertLog');
+  if (!alerts || alerts.length === 0) {
+    el.innerHTML = '<div class="alert-row empty">No alerts recorded this session</div>';
+    return;
+  }
+  el.innerHTML = alerts.map(a => {
+    const lvl  = a.level || a.alert_level || 1;
+    const ts   = a.ts    || a.timestamp   || '--';
+    const msg  = a.message || a.msg       || 'Alert triggered';
+    const ack  = a.acknowledged ? '<span class="alert-ack">✓ Acked</span>' : '';
+    return `<div class="alert-row">
+      <div class="alert-pip pip-${lvl}"></div>
+      <div class="alert-ts">${ts}</div>
+      <div class="alert-msg">${msg}</div>
+      ${ack}
+      <div class="alert-lvl-tag lvl-${lvl}">L${lvl}</div>
+    </div>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

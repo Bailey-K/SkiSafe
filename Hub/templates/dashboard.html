@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkiSafe — Live Dashboard</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #eef2f7; --surface: #fff; --surface-2: #f7fafc; --border: #e2e8f0;
+  --text: #1a202c; --text-muted: #718096;
+  --ok: #2f855a; --ok-bg: #f0fff4; --ok-border: #9ae6b4;
+  --warn: #b7791f; --warn-bg: #fffff0; --warn-border: #f6e05e;
+  --alert: #c05621; --alert-bg: #fff8f0; --alert-border: #fbd38d;
+  --sos: #c53030; --sos-bg: #fff5f5; --sos-border: #feb2b2;
+  --blue: #2b6cb0; --blue-light: #ebf8ff;
+  --accent: #1a365d; --radius: 10px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* ── Header ── */
+.header { background: var(--accent); color: white; padding: 0 20px; height: 54px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 10px rgba(0,0,0,0.25); position: sticky; top: 0; z-index: 100; }
+.header-left { display: flex; align-items: center; gap: 14px; }
+.logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.logo em { font-style: normal; color: #63b3ed; }
+.conn-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; display: flex; align-items: center; gap: 5px; background: rgba(56,161,105,0.25); color: #9ae6b4; border: 1px solid rgba(56,161,105,0.4); }
+.conn-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: #68d391; animation: live-pulse 2s infinite; }
+@keyframes live-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(104,211,145,0.6)}50%{box-shadow:0 0 0 4px rgba(104,211,145,0)} }
+.header-time { font-size: 13px; color: #90cdf4; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ── Nav ── */
+.nav { background: #2d3748; display: flex; padding: 0 20px; }
+.nav-tab { padding: 11px 18px; font-size: 13px; font-weight: 600; color: #a0aec0; text-decoration: none; border-bottom: 3px solid transparent; display: flex; align-items: center; gap: 6px; transition: color 0.15s; }
+.nav-tab:hover { color: #e2e8f0; }
+.nav-tab.active { color: #63b3ed; border-bottom-color: #63b3ed; }
+.nav-tab .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: #fc8181; display: none; }
+.nav-tab.has-alert .tab-dot { display: inline-block; animation: pulse-tab 1s infinite; }
+@keyframes pulse-tab { 0%,100%{opacity:1}50%{opacity:0.4} }
+
+/* ── Layout ── */
+.page { padding: 18px 20px; max-width: 1060px; margin: 0 auto; }
+
+/* ── Status bar ── */
+.status-bar { background: var(--surface); border-radius: var(--radius); padding: 14px 18px; display: flex; align-items: center; gap: 14px; margin-bottom: 14px; box-shadow: var(--shadow); }
+.status-badge { font-size: 13px; font-weight: 800; letter-spacing: 1.2px; padding: 7px 20px; border-radius: 99px; text-transform: uppercase; white-space: nowrap; transition: all 0.3s; }
+.status-badge.ok    { background: var(--ok-bg);    color: var(--ok);    border: 2px solid var(--ok-border); }
+.status-badge.warn  { background: var(--warn-bg);  color: var(--warn);  border: 2px solid var(--warn-border); }
+.status-badge.alert { background: var(--alert-bg); color: var(--alert); border: 2px solid var(--alert-border); }
+.status-badge.sos   { background: var(--sos-bg);   color: var(--sos);   border: 2px solid var(--sos-border); animation: sos-pulse 1s infinite; }
+@keyframes sos-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(197,48,48,0.4);transform:scale(1)}50%{box-shadow:0 0 0 8px rgba(197,48,48,0);transform:scale(1.02)} }
+.status-desc { flex: 1; font-size: 13px; color: var(--text-muted); }
+.ack-btn { padding: 7px 18px; background: var(--sos); color: white; border: none; border-radius: 8px; font-weight: 700; font-size: 12px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; }
+.ack-btn:hover { opacity: 0.85; }
+.ack-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* ── Sensor grid ── */
+.sensor-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+@media (max-width: 720px) { .sensor-grid { grid-template-columns: repeat(2, 1fr); } }
+.sensor-card { background: var(--surface); border-radius: var(--radius); padding: 14px 14px 10px; box-shadow: var(--shadow); border-left: 4px solid transparent; transition: border-color 0.3s; }
+.sensor-card.ok   { border-left-color: var(--ok); }
+.sensor-card.warn { border-left-color: var(--warn); }
+.sensor-card.crit { border-left-color: var(--sos); }
+.sensor-card.blue { border-left-color: var(--blue); }
+.sensor-card.grey { border-left-color: #cbd5e0; }
+.sensor-icon { font-size: 16px; margin-bottom: 6px; }
+.sensor-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 4px; }
+.sensor-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.sensor-value .unit { font-size: 12px; font-weight: 400; color: var(--text-muted); margin-left: 2px; }
+.sensor-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.sensor-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-top: 4px; }
+.tag-ok   { background: var(--ok-bg);      color: var(--ok); }
+.tag-warn { background: var(--warn-bg);    color: var(--warn); }
+.tag-crit { background: var(--sos-bg);     color: var(--sos); }
+.tag-blue { background: var(--blue-light); color: var(--blue); }
+.tag-grey { background: #f7fafc; color: #718096; }
+
+/* ══ LIVE TRACKER ══ */
+.tracker-panel { background: #1a2535; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden; }
+.tracker-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 8px; background: #1e2d40; border-bottom: 1px solid #2d3f55; }
+.tracker-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #90cdf4; display: flex; align-items: center; gap: 8px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: #68d391; animation: live-pulse 2s infinite; flex-shrink: 0; }
+.tracker-controls { display: flex; gap: 6px; }
+.tracker-btn { padding: 4px 10px; background: rgba(255,255,255,0.08); color: #a0aec0; border: 1px solid rgba(255,255,255,0.12); border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.tracker-btn:hover { background: rgba(255,255,255,0.15); color: white; }
+.tracker-btn.active { background: rgba(49,130,206,0.3); color: #63b3ed; border-color: rgba(49,130,206,0.5); }
+.tracker-body { display: flex; height: 280px; }
+.tracker-map { flex: 1; position: relative; }
+#trackCanvas { width: 100%; height: 100%; display: block; }
+.no-fix-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(26,37,53,0.92); color: #a0aec0; font-size: 13px; font-weight: 600; gap: 8px; pointer-events: none; transition: opacity 0.4s; }
+.no-fix-overlay.hidden { opacity: 0; }
+.no-fix-icon { font-size: 28px; opacity: 0.5; }
+.tracker-stats { width: 130px; flex-shrink: 0; background: #162030; border-left: 1px solid #2d3f55; display: flex; flex-direction: column; padding: 10px 0; }
+.tstat { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.tstat:last-child { border-bottom: none; }
+.tstat-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #4a6080; margin-bottom: 3px; }
+.tstat-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: white; line-height: 1; }
+.tstat-unit { font-size: 11px; font-weight: 400; color: #5a7a9a; margin-left: 2px; }
+.tstat-sub { font-size: 10px; color: #4a6080; margin-top: 2px; }
+.compass-wrap { padding: 10px 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: auto; border-top: 1px solid rgba(255,255,255,0.05); }
+.compass-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #4a6080; }
+#compassCanvas { width: 70px; height: 70px; }
+
+/* ── Alert log ── */
+.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); }
+.update-note { font-size: 11px; color: var(--text-muted); }
+.alert-table { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.alert-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.alert-row:last-child { border-bottom: none; }
+.alert-row.empty { color: var(--text-muted); justify-content: center; padding: 18px; font-style: italic; }
+.alert-pip { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.pip-1 { background: var(--warn); } .pip-2 { background: var(--alert); } .pip-3 { background: var(--sos); }
+.alert-ts { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 72px; }
+.alert-msg { flex: 1; }
+.alert-lvl-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.lvl-1 { background: var(--warn-bg); color: var(--warn); }
+.lvl-2 { background: var(--alert-bg); color: var(--alert); }
+.lvl-3 { background: var(--sos-bg); color: var(--sos); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo">Ski<em>Safe</em></div>
+    <div class="conn-badge"><div class="dot"></div><span>LIVE</span></div>
+  </div>
+  <div class="header-time" id="headerTime">--:--:--</div>
+</div>
+
+<!-- Nav -->
+<nav class="nav">
+  <a class="nav-tab active" id="tab-live" href="/">
+    <div class="tab-dot"></div>⬤ Live View
+  </a>
+  <a class="nav-tab" href="/review">📊 Post-Session Review</a>
+</nav>
+
+<!-- Page -->
+<div class="page">
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-badge ok" id="statusBadge">OK</div>
+    <div class="status-desc" id="statusDesc">Waiting for data…</div>
+    <button class="ack-btn" id="ackBtn" onclick="doAck()" disabled>Acknowledge</button>
+  </div>
+
+  <!-- Sensor cards -->
+  <div class="sensor-grid">
+    <div class="sensor-card grey" id="card-temp">
+      <div class="sensor-icon">🌡</div>
+      <div class="sensor-label">Skin Temperature</div>
+      <div class="sensor-value" id="val-temp">--<span class="unit">°C</span></div>
+      <div class="sensor-sub" id="sub-temp">NTC thermistor · P14</div>
+      <div class="sensor-tag tag-grey" id="tag-temp">—</div>
+    </div>
+    <div class="sensor-card grey" id="card-light">
+      <div class="sensor-icon">☀</div>
+      <div class="sensor-label">Light / Burial</div>
+      <div class="sensor-value" id="val-light">--<span class="unit">lx</span></div>
+      <div class="sensor-sub" id="sub-light">BH1750 · I2C 0x23</div>
+      <div class="sensor-tag tag-grey" id="tag-light">—</div>
+    </div>
+    <div class="sensor-card grey" id="card-gps">
+      <div class="sensor-icon">📍</div>
+      <div class="sensor-label">GPS Position</div>
+      <div class="sensor-value" style="font-size:13px;line-height:1.5;" id="val-gps">--</div>
+      <div class="sensor-sub" id="sub-gps">Alt: -- m</div>
+      <div class="sensor-tag tag-grey" id="tag-gps">—</div>
+    </div>
+    <div class="sensor-card grey" id="card-speed">
+      <div class="sensor-icon">⚡</div>
+      <div class="sensor-label">Speed</div>
+      <div class="sensor-value" id="val-speed">--<span class="unit">km/h</span></div>
+      <div class="sensor-sub" id="sub-speed">NEO-6M GPS</div>
+      <div class="sensor-tag tag-grey" id="tag-speed">—</div>
+    </div>
+  </div>
+
+  <!-- Live tracker -->
+  <div class="tracker-panel">
+    <div class="tracker-header">
+      <div class="tracker-title">
+        <div class="live-dot"></div>Live Skier Tracking
+      </div>
+      <div class="tracker-controls">
+        <button class="tracker-btn active" id="btnFollow" onclick="toggleFollow()">⊙ Follow</button>
+        <button class="tracker-btn" onclick="fitTrack()">⊞ Fit track</button>
+        <button class="tracker-btn" onclick="clearTrack()">✕ Clear</button>
+      </div>
+    </div>
+    <div class="tracker-body">
+      <div class="tracker-map">
+        <canvas id="trackCanvas"></canvas>
+        <div class="no-fix-overlay" id="noFixOverlay">
+          <div class="no-fix-icon">📡</div>
+          <div>Acquiring GPS Fix…</div>
+          <div style="font-size:11px;opacity:0.6">NEO-6M · waiting for satellites</div>
+        </div>
+      </div>
+      <div class="tracker-stats">
+        <div class="tstat">
+          <div class="tstat-label">Speed</div>
+          <div class="tstat-val" id="ts-speed">--<span class="tstat-unit">km/h</span></div>
+          <div class="tstat-sub" id="ts-speed-sub">—</div>
+        </div>
+        <div class="tstat">
+          <div class="tstat-label">Altitude</div>
+          <div class="tstat-val" id="ts-alt">--<span class="tstat-unit">m</span></div>
+          <div class="tstat-sub" id="ts-alt-sub">—</div>
+        </div>
+        <div class="tstat">
+          <div class="tstat-label">Track pts</div>
+          <div class="tstat-val" id="ts-pts">0</div>
+          <div class="tstat-sub">last 200</div>
+        </div>
+        <div class="tstat">
+          <div class="tstat-label">Heading</div>
+          <div class="tstat-val" style="font-size:15px;padding-top:2px;" id="ts-heading">--</div>
+          <div class="tstat-sub" id="ts-hdeg">—</div>
+        </div>
+        <div class="compass-wrap">
+          <div class="compass-label">Compass</div>
+          <canvas id="compassCanvas" width="70" height="70"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert log -->
+  <div class="section-head">
+    <div class="section-title">Alert Log</div>
+    <div class="update-note" id="lastUpdate">—</div>
+  </div>
+  <div class="alert-table" id="alertLog">
+    <div class="alert-row empty">Waiting for data…</div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+const POLL_MS  = 5000;
+const TRAIL_MAX = 200;
+
+let gpsTrail   = [];
+let followMode = true;
+let trackRAF   = null;
+let headingDeg = 0;
+let prevAlt    = null;
+let lastAlerts = [];
+
+// ═══════════════════════════════════════════════════════
+// CLOCK
+// ═══════════════════════════════════════════════════════
+function tickClock() {
+  document.getElementById('headerTime').textContent =
+    new Date().toLocaleTimeString('en-AU', {hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ═══════════════════════════════════════════════════════
+// POLLING
+// ═══════════════════════════════════════════════════════
+async function poll() {
+  try {
+    const [sr, ar] = await Promise.all([
+      fetch('/api/state'),
+      fetch('/api/alerts')
+    ]);
+    if (!sr.ok) return;
+    const state  = await sr.json();
+    const alerts = ar.ok ? await ar.json() : [];
+    lastAlerts = alerts;
+    if (state.lat && state.lat !== 0 && state.lon && state.lon !== 0) {
+      pushTrailPoint(state.lat, state.lon, state.altitude || state.alt || 0, state.speed || 0);
+    }
+    renderState(state, alerts);
+  } catch (e) {
+    console.warn('Poll error:', e);
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+
+// ═══════════════════════════════════════════════════════
+// RENDER STATE
+// ═══════════════════════════════════════════════════════
+const STATUS_LABEL = ['OK', 'WARNING', 'ALERT', 'SOS'];
+const STATUS_CLASS = ['ok', 'warn', 'alert', 'sos'];
+const STATUS_DESC  = [
+  'All systems nominal — skier is safe.',
+  'Cold exposure detected — monitoring closely.',
+  'Fall detected — awaiting acknowledgement.',
+  '⚠ SOS escalated — emergency email sent.'
+];
+
+function renderState(s, alerts) {
+  const lvl = s.alert || 0;
+
+  // Status bar
+  document.getElementById('statusBadge').textContent = STATUS_LABEL[lvl];
+  document.getElementById('statusBadge').className   = 'status-badge ' + STATUS_CLASS[lvl];
+  document.getElementById('statusDesc').textContent  = STATUS_DESC[lvl];
+  document.getElementById('ackBtn').disabled = (lvl < 2);
+
+  // Alert dot on tab
+  document.getElementById('tab-live').classList.toggle('has-alert', lvl >= 2);
+
+  // ── Skin temp ──
+  const temp = s.skin_temp;
+  setCard('temp',
+    (temp != null ? temp.toFixed(1) : '--') + '<span class="unit">°C</span>',
+    temp == null  ? {cls:'grey', tag:'No data',         tagCls:'tag-grey', sub:'NTC thermistor · P14'} :
+    temp < 15     ? {cls:'crit', tag:'HYPOTHERMIA RISK',tagCls:'tag-crit', sub:'Immediate alert active'} :
+    temp < 20     ? {cls:'warn', tag:'COOL',            tagCls:'tag-warn', sub:'Below comfortable range'} :
+                    {cls:'ok',   tag:'NORMAL',           tagCls:'tag-ok',   sub:'Comfortable range'}
+  );
+
+  // ── Light / burial ──
+  const lx = s.light;
+  setCard('light',
+    (lx != null ? Math.round(lx).toLocaleString() : '--') + '<span class="unit">lx</span>',
+    lx == null  ? {cls:'grey', tag:'No data',        tagCls:'tag-grey', sub:'BH1750 · I2C 0x23'} :
+    lx < 50     ? {cls:'crit', tag:'POSSIBLE BURIAL',tagCls:'tag-crit', sub:'Darkness + immobility → L3'} :
+    lx < 500    ? {cls:'warn', tag:'LOW LIGHT',      tagCls:'tag-warn', sub:'Shadow or overcast'} :
+                  {cls:'blue', tag:'OUTDOOR',         tagCls:'tag-blue', sub:'Normal outdoor exposure'}
+  );
+
+  // ── GPS ──
+  const lat = s.lat, lon = s.lon;
+  const gpsOk = lat && lat !== 0 && lon && lon !== 0;
+  const alt   = s.altitude || s.alt;
+  setCard('gps',
+    gpsOk ? lat.toFixed(5) + '<br>' + lon.toFixed(5) : 'No Fix',
+    gpsOk ? {cls:'blue', tag:'GPS LOCK', tagCls:'tag-blue', sub:'Alt: ' + (alt != null ? Math.round(alt) + ' m' : '--')}
+           : {cls:'grey', tag:'NO FIX',  tagCls:'tag-grey', sub:'NEO-6M searching…'}
+  );
+
+  // ── Speed ──
+  const spd = s.speed;
+  setCard('speed',
+    (spd != null ? spd.toFixed(1) : '--') + '<span class="unit">km/h</span>',
+    spd == null  ? {cls:'grey', tag:'No data',   tagCls:'tag-grey', sub:'NEO-6M GPS'} :
+    spd > 60     ? {cls:'warn', tag:'HIGH SPEED',tagCls:'tag-warn', sub:'Above 60 km/h'} :
+    spd > 0      ? {cls:'blue', tag:'MOVING',    tagCls:'tag-blue', sub:'Active skiing'} :
+                   {cls:'grey', tag:'STOPPED',   tagCls:'tag-grey', sub:'Stationary'}
+  );
+
+  renderAlertLog(alerts);
+  document.getElementById('lastUpdate').textContent =
+    'Updated ' + new Date().toLocaleTimeString('en-AU', {hour12:false});
+}
+
+function setCard(id, html, opts) {
+  document.getElementById('card-' + id).className = 'sensor-card ' + opts.cls;
+  document.getElementById('val-'  + id).innerHTML  = html;
+  document.getElementById('sub-'  + id).textContent = opts.sub;
+  const tag = document.getElementById('tag-' + id);
+  tag.className   = 'sensor-tag ' + opts.tagCls;
+  tag.textContent = opts.tag;
+}
+
+function renderAlertLog(alerts) {
+  const el = document.getElementById('alertLog');
+  if (!alerts || alerts.length === 0) {
+    el.innerHTML = '<div class="alert-row empty">No alerts this session</div>';
+    return;
+  }
+  el.innerHTML = alerts.slice(0, 10).map(a => {
+    const lvl = a.level || a.alert_level || 1;
+    const ts  = a.ts    || a.timestamp   || '--';
+    const msg = a.message || a.msg       || 'Alert triggered';
+    return `<div class="alert-row">
+      <div class="alert-pip pip-${lvl}"></div>
+      <div class="alert-ts">${ts}</div>
+      <div class="alert-msg">${msg}</div>
+      <div class="alert-lvl-tag lvl-${lvl}">L${lvl}</div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+// ACKNOWLEDGE
+// ═══════════════════════════════════════════════════════
+async function doAck() {
+  try { await fetch('/api/ack', {method: 'POST'}); } catch (e) {}
+  document.getElementById('ackBtn').disabled = true;
+  document.getElementById('statusBadge').textContent = 'OK';
+  document.getElementById('statusBadge').className   = 'status-badge ok';
+  document.getElementById('statusDesc').textContent  = 'Alert acknowledged. Monitoring resumed.';
+  document.getElementById('tab-live').classList.remove('has-alert');
+}
+
+// ═══════════════════════════════════════════════════════
+// GPS TRAIL
+// ═══════════════════════════════════════════════════════
+function pushTrailPoint(lat, lon, alt, spd) {
+  gpsTrail.push({lat, lon, alt: alt || 0, speed: spd || 0});
+  if (gpsTrail.length > TRAIL_MAX) gpsTrail.shift();
+
+  if (gpsTrail.length >= 2) {
+    const a = gpsTrail[gpsTrail.length - 2];
+    const b = gpsTrail[gpsTrail.length - 1];
+    headingDeg = (Math.atan2(b.lon - a.lon, b.lat - a.lat) * 180 / Math.PI + 360) % 360;
+  }
+
+  document.getElementById('noFixOverlay').classList.add('hidden');
+  if (!trackRAF) scheduleTrackDraw();
+}
+
+function headingToCardinal(deg) {
+  return ['N','NE','E','SE','S','SW','W','NW'][Math.round(deg / 45) % 8];
+}
+
+// ═══════════════════════════════════════════════════════
+// TRACKER CANVAS
+// ═══════════════════════════════════════════════════════
+function scheduleTrackDraw() {
+  trackRAF = requestAnimationFrame(() => { trackRAF = null; drawTrack(); });
+}
+
+function drawTrack() {
+  const canvas = document.getElementById('trackCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  if (!W || !H || gpsTrail.length === 0) return;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pts = gpsTrail;
+  const last = pts[pts.length - 1];
+
+  // ── Viewport ──
+  let minLat, maxLat, minLon, maxLon;
+  if (followMode) {
+    const win  = pts.slice(-60);
+    const cLat = win.reduce((s,p) => s + p.lat, 0) / win.length;
+    const cLon = win.reduce((s,p) => s + p.lon, 0) / win.length;
+    const span = Math.max(
+      Math.max(...win.map(p=>p.lat)) - Math.min(...win.map(p=>p.lat)),
+      Math.max(...win.map(p=>p.lon)) - Math.min(...win.map(p=>p.lon)),
+      0.002
+    ) * 1.6;
+    minLat = cLat - span/2; maxLat = cLat + span/2;
+    minLon = cLon - span/2; maxLon = cLon + span/2;
+  } else {
+    const pad = 0.0015;
+    minLat = Math.min(...pts.map(p=>p.lat)) - pad;
+    maxLat = Math.max(...pts.map(p=>p.lat)) + pad;
+    minLon = Math.min(...pts.map(p=>p.lon)) - pad;
+    maxLon = Math.max(...pts.map(p=>p.lon)) + pad;
+  }
+
+  const ranLat = maxLat - minLat || 0.001;
+  const ranLon = maxLon - minLon || 0.001;
+  const M = 24;
+  const tx = lon => M + (lon - minLon) / ranLon * (W - 2*M);
+  const ty = lat => (H - M) - (lat - minLat) / ranLat * (H - 2*M);
+
+  const alts = pts.map(p => p.alt);
+  const minAlt = Math.min(...alts);
+  const ranAlt = Math.max(...alts) - minAlt || 1;
+  const altCol = alt => {
+    const t = (alt - minAlt) / ranAlt;
+    return `rgb(${Math.round(30+t*10)},${Math.round(100+t*120)},${Math.round(210-t*80)})`;
+  };
+
+  // Background
+  ctx.fillStyle = '#1a2535';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 5; i++) {
+    const x = M + (W-2*M)*i/5, y = M + (H-2*M)*i/5;
+    ctx.beginPath(); ctx.moveTo(x,M); ctx.lineTo(x,H-M); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(M,y); ctx.lineTo(W-M,y); ctx.stroke();
+  }
+
+  // Scale bar
+  const barDeg = 0.001;
+  const barPx  = barDeg / ranLon * (W - 2*M);
+  const barM   = Math.round(barDeg * 111320);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillRect(M, H - 14, barPx, 2);
+  ctx.font = '9px -apple-system,sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.fillText(barM + 'm', M + barPx + 4, H - 11);
+
+  // N label
+  ctx.font = 'bold 10px -apple-system,sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillText('N', W - M - 4, M + 10);
+
+  // Trail
+  if (pts.length > 1) {
+    for (let i = 1; i < pts.length; i++) {
+      const age = (pts.length - i) / pts.length;
+      ctx.beginPath();
+      ctx.moveTo(tx(pts[i-1].lon), ty(pts[i-1].lat));
+      ctx.lineTo(tx(pts[i].lon),   ty(pts[i].lat));
+      ctx.strokeStyle = altCol(pts[i].alt);
+      ctx.globalAlpha = Math.max(0.08, 1 - age * 0.85);
+      ctx.lineWidth   = age < 0.3 ? 3 : 2;
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Alert markers
+  lastAlerts.forEach((a, idx) => {
+    if ((a.level || 0) < 2 || gpsTrail.length < 5) return;
+    const i = Math.max(0, gpsTrail.length - 10 - idx * 4);
+    const p = gpsTrail[i];
+    ctx.beginPath();
+    ctx.arc(tx(p.lon), ty(p.lat), 5, 0, Math.PI*2);
+    ctx.fillStyle = '#f6ad55';
+    ctx.fill();
+    ctx.strokeStyle = '#1a2535';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+
+  // Current position
+  const px = tx(last.lon), py = ty(last.lat);
+
+  // Accuracy rings
+  [0.06, 0.12, 0.2].forEach((alpha, i) => {
+    ctx.beginPath();
+    ctx.arc(px, py, 22 - i*5, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(99,179,237,${alpha})`;
+    ctx.fill();
+  });
+
+  // Heading arrow
+  if (pts.length >= 3) {
+    const rad = headingDeg * Math.PI / 180;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(rad);
+    ctx.beginPath();
+    ctx.moveTo(0, -28);
+    ctx.lineTo(-5, -16);
+    ctx.lineTo(5, -16);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(99,179,237,0.7)';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Position dot
+  ctx.beginPath();
+  ctx.arc(px, py, 7, 0, Math.PI*2);
+  ctx.fillStyle = '#63b3ed';
+  ctx.fill();
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Coordinate label
+  ctx.font = '10px ui-monospace,monospace';
+  ctx.fillStyle = 'rgba(144,205,244,0.85)';
+  const lx2 = Math.min(px + 12, W - 115);
+  const ly2 = Math.max(py - 10, 18);
+  ctx.fillText(last.lat.toFixed(5) + ', ' + last.lon.toFixed(5), lx2, ly2);
+
+  // Update stats sidebar
+  const spd = last.speed;
+  document.getElementById('ts-speed').innerHTML =
+    spd.toFixed(1) + '<span class="tstat-unit">km/h</span>';
+  document.getElementById('ts-speed-sub').textContent =
+    spd > 60 ? 'High speed' : spd > 0 ? 'Active skiing' : 'Stationary';
+
+  const curAlt = last.alt;
+  document.getElementById('ts-alt').innerHTML =
+    Math.round(curAlt) + '<span class="tstat-unit">m</span>';
+  document.getElementById('ts-alt-sub').textContent =
+    prevAlt == null ? '—' : curAlt > prevAlt ? '↑ Ascending' : curAlt < prevAlt ? '↓ Descending' : '→ Level';
+  prevAlt = curAlt;
+
+  document.getElementById('ts-pts').textContent = pts.length;
+
+  const card = headingToCardinal(headingDeg);
+  document.getElementById('ts-heading').textContent = card;
+  document.getElementById('ts-hdeg').textContent    = Math.round(headingDeg) + '°';
+
+  drawCompass(headingDeg);
+}
+
+function drawCompass(deg) {
+  const c = document.getElementById('compassCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  c.width = 70*dpr; c.height = 70*dpr;
+  const ctx = c.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const cx = 35, cy = 35, r = 28;
+
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1; ctx.stroke();
+
+  ['N','E','S','W'].forEach((d, i) => {
+    const a = i * Math.PI/2 - Math.PI/2;
+    ctx.beginPath();
+    ctx.moveTo(cx + (r-5)*Math.cos(a), cy + (r-5)*Math.sin(a));
+    ctx.lineTo(cx + r*Math.cos(a),     cy + r*Math.sin(a));
+    ctx.strokeStyle = d==='N' ? '#fc8181' : 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = d==='N' ? 2 : 1; ctx.stroke();
+    ctx.font = d==='N' ? 'bold 9px sans-serif' : '8px sans-serif';
+    ctx.fillStyle = d==='N' ? '#fc8181' : 'rgba(255,255,255,0.4)';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(d, cx + (r-14)*Math.cos(a), cy + (r-14)*Math.sin(a));
+  });
+
+  const rad = (deg - 90) * Math.PI / 180;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(rad + Math.PI/2);
+  ctx.beginPath(); ctx.moveTo(0,-r+5); ctx.lineTo(-3,0); ctx.lineTo(3,0); ctx.closePath();
+  ctx.fillStyle = '#fc8181'; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0,r-5); ctx.lineTo(-3,0); ctx.lineTo(3,0); ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fill();
+  ctx.restore();
+
+  ctx.beginPath(); ctx.arc(cx,cy,3,0,Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
+}
+
+// ═══════════════════════════════════════════════════════
+// TRACKER CONTROLS
+// ═══════════════════════════════════════════════════════
+function toggleFollow() {
+  followMode = !followMode;
+  document.getElementById('btnFollow').classList.toggle('active', followMode);
+  scheduleTrackDraw();
+}
+function fitTrack() {
+  followMode = false;
+  document.getElementById('btnFollow').classList.remove('active');
+  scheduleTrackDraw();
+}
+function clearTrack() {
+  gpsTrail = [];
+  prevAlt  = null;
+  document.getElementById('ts-pts').textContent = '0';
+  document.getElementById('noFixOverlay').classList.remove('hidden');
+  const canvas = document.getElementById('trackCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1a2535';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// Redraw on resize
+new ResizeObserver(() => {
+  if (gpsTrail.length > 0) scheduleTrackDraw();
+}).observe(document.getElementById('trackCanvas').parentElement);
+</script>
+</body>
+</html>
