@@ -23,3 +23,7 @@ Thumbs.db
 # Local Automation Shortcuts
 launch.bat
 *.bat
+
+# Local project docs (machine-generated, not for repo)
+SKISAFE_PROJECT_KNOWLEDGE.md
+SKISAFE_REMAINING.md
