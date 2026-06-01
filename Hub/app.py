@@ -8,14 +8,19 @@ Run from the skisafe directory so Flask can find the templates folder:
     cd ~/skisafe && python3 app.py
 
 Routes:
-    /                   Live dashboard
-    /review             Post-session review
-    /api/state          Latest flat sensor reading (polled by dashboard every 5s)
-    /api/history        Last N sensor_log rows (oldest first, for charts)
-    /api/alerts         Full alert_log (most recent first)
-    /api/session        Session summary statistics
-    /api/ack  POST      Acknowledge active alert(s)
-    /api/alert POST     Inject a test alert (for testing email escalation)
+    /                       Live dashboard
+    /review                 Post-session review
+    /api/state              Latest flat sensor reading (polled by dashboard every 5s)
+    /api/history            Last N sensor_log rows (oldest first, for charts)
+                              ?session_id=X   filter to a specific session
+                              ?limit=200
+    /api/alerts             Full alert_log (most recent first)
+                              ?session_id=X
+    /api/session            Session summary statistics
+                              ?session_id=X
+    /api/sessions           List of all sessions (most recent first)
+    /api/ack  POST          Acknowledge active alert(s)
+    /api/alert POST         Inject a test alert (for testing email escalation)
 
 Environment variables (set in ~/.bashrc — do NOT hard-code credentials):
     SMTP_USER           Gmail address used to send SOS email
@@ -36,8 +41,6 @@ from datetime import datetime
 from email.message import EmailMessage
 
 # ── App setup ─────────────────────────────────────────────────────────────────
-# template_folder resolves to ./templates relative to this file.
-# Always run: cd ~/skisafe && python3 app.py  (not python3 ~/skisafe/app.py)
 app = Flask(__name__, template_folder='templates')
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -59,8 +62,17 @@ def get_db():
 def ensure_schema():
     conn = get_db()
     conn.executescript('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            start_ts     TEXT    NOT NULL,
+            end_ts       TEXT,
+            skier_id     TEXT,
+            start_epoch  REAL    NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS sensor_log (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   INTEGER REFERENCES sessions(id),
             ts           TEXT    NOT NULL,
             skier_id     TEXT,
             packet_count INTEGER,
@@ -74,8 +86,10 @@ def ensure_schema():
             rssi         INTEGER,
             snr          REAL
         );
+
         CREATE TABLE IF NOT EXISTS alert_log (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id    INTEGER REFERENCES sessions(id),
             ts            TEXT    NOT NULL,
             created_epoch REAL    NOT NULL,
             skier_id      TEXT,
@@ -91,6 +105,15 @@ def ensure_schema():
         );
     ''')
     conn.commit()
+
+    # ── Migration: add columns to existing tables if missing ──────────────────
+    for tbl in ('sensor_log', 'alert_log'):
+        cols = [r[1] for r in conn.execute('PRAGMA table_info(' + tbl + ')').fetchall()]
+        if 'session_id' not in cols:
+            conn.execute('ALTER TABLE ' + tbl + ' ADD COLUMN session_id INTEGER')
+            conn.commit()
+            print('[db] Migrated ' + tbl + ' — added session_id column')
+
     conn.close()
 
 
@@ -185,10 +208,7 @@ def review():
 def api_state():
     """
     Latest sensor reading as a flat dict — consumed directly by dashboard.html.
-    Returns the most recent row from sensor_log.
-
-    Shape: { ts, skier_id, skin_temp, light, lat, lon, altitude, speed,
-             alert, rssi, snr, packet_count }
+    Includes session_id so the dashboard can detect session changes.
     """
     conn = get_db()
     try:
@@ -202,15 +222,59 @@ def api_state():
         conn.close()
 
 
-@app.route('/api/history')
-def api_history():
-    """Last N sensor readings, oldest first (charts need chronological order)."""
+@app.route('/api/sessions')
+def api_sessions():
+    """
+    List of all sessions, most recent first.
+    Shape: [{ id, start_ts, end_ts, skier_id, start_epoch, reading_count }]
+    """
     conn = get_db()
     try:
-        limit = int(request.args.get('limit', 200))
-        rows  = conn.execute(
-            'SELECT * FROM sensor_log ORDER BY id ASC LIMIT ?', (limit,)
-        ).fetchall()
+        rows = conn.execute('''
+            SELECT s.*,
+                   COUNT(sl.id) AS reading_count
+            FROM sessions s
+            LEFT JOIN sensor_log sl ON sl.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.id DESC
+        ''').fetchall()
+        return jsonify([dict(r) for r in rows])
+    finally:
+        conn.close()
+
+
+@app.route('/api/history')
+def api_history():
+    """
+    Sensor readings oldest-first (charts need chronological order).
+    ?session_id=X  — restrict to a specific session
+    ?limit=200     — max rows (default 200)
+    """
+    conn = get_db()
+    try:
+        limit      = int(request.args.get('limit', 200))
+        session_id = request.args.get('session_id')
+
+        if session_id and session_id != 'latest':
+            rows = conn.execute(
+                'SELECT * FROM sensor_log WHERE session_id=? ORDER BY id ASC LIMIT ?',
+                (int(session_id), limit)
+            ).fetchall()
+        else:
+            # Default: latest session
+            latest = conn.execute(
+                'SELECT id FROM sessions ORDER BY id DESC LIMIT 1'
+            ).fetchone()
+            if latest:
+                rows = conn.execute(
+                    'SELECT * FROM sensor_log WHERE session_id=? ORDER BY id ASC LIMIT ?',
+                    (latest['id'], limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT * FROM sensor_log ORDER BY id ASC LIMIT ?', (limit,)
+                ).fetchall()
+
         return jsonify([dict(r) for r in rows])
     finally:
         conn.close()
@@ -218,13 +282,35 @@ def api_history():
 
 @app.route('/api/alerts')
 def api_alerts():
-    """Full alert log, most recent first."""
+    """
+    Alert log, most recent first.
+    ?session_id=X — restrict to a specific session
+    """
     conn = get_db()
     try:
-        limit = int(request.args.get('limit', 100))
-        rows  = conn.execute(
-            'SELECT * FROM alert_log ORDER BY id DESC LIMIT ?', (limit,)
-        ).fetchall()
+        limit      = int(request.args.get('limit', 100))
+        session_id = request.args.get('session_id')
+
+        if session_id and session_id != 'latest':
+            rows = conn.execute(
+                'SELECT * FROM alert_log WHERE session_id=? ORDER BY id DESC LIMIT ?',
+                (int(session_id), limit)
+            ).fetchall()
+        else:
+            # Default: latest session
+            latest = conn.execute(
+                'SELECT id FROM sessions ORDER BY id DESC LIMIT 1'
+            ).fetchone()
+            if latest:
+                rows = conn.execute(
+                    'SELECT * FROM alert_log WHERE session_id=? ORDER BY id DESC LIMIT ?',
+                    (latest['id'], limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT * FROM alert_log ORDER BY id DESC LIMIT ?', (limit,)
+                ).fetchall()
+
         return jsonify([dict(r) for r in rows])
     finally:
         conn.close()
@@ -234,11 +320,26 @@ def api_alerts():
 def api_session():
     """
     Session summary statistics.
-    Includes aliased field names that review.html expects:
-        duration_min, alert_count, min_temp, max_speed
+    ?session_id=X — specific session (default: latest)
     """
     conn = get_db()
     try:
+        session_id = request.args.get('session_id')
+
+        if session_id and session_id != 'latest':
+            sid = int(session_id)
+        else:
+            latest = conn.execute(
+                'SELECT id FROM sessions ORDER BY id DESC LIMIT 1'
+            ).fetchone()
+            sid = latest['id'] if latest else None
+
+        if sid is None:
+            return jsonify({})
+
+        # Session metadata
+        sess = conn.execute('SELECT * FROM sessions WHERE id=?', (sid,)).fetchone()
+
         s = conn.execute('''
             SELECT
                 COUNT(*)                                      AS total_readings,
@@ -250,15 +351,18 @@ def api_session():
                 MAX(altitude)                                 AS max_altitude,
                 SUM(CASE WHEN alert >= 2 THEN 1 ELSE 0 END)  AS total_alerts
             FROM sensor_log
-        ''').fetchone()
+            WHERE session_id=?
+        ''', (sid,)).fetchone()
 
         row = dict(s)
+        if sess:
+            row['session_id']  = sess['id']
+            row['skier_id']    = sess['skier_id']
 
-        # Compute duration in minutes from first/last timestamp
+        # Duration in minutes
         dur = None
         if row['session_start'] and row['session_end']:
             try:
-                # Trim microseconds for safe parsing
                 fmt = '%Y-%m-%dT%H:%M:%S.%f'
                 t0  = datetime.strptime(row['session_start'][:26], fmt)
                 t1  = datetime.strptime(row['session_end'][:26],   fmt)
@@ -266,7 +370,6 @@ def api_session():
             except Exception:
                 pass
 
-        # Aliased fields for review.html
         row['duration_min'] = dur
         row['alert_count']  = row['total_alerts']
         row['min_temp']     = row['min_skin_temp']
@@ -278,12 +381,7 @@ def api_session():
 
 @app.route('/api/ack', methods=['POST'])
 def api_ack():
-    """
-    Acknowledge active alert(s).
-
-    Called by dashboard.html with no body  → acknowledges ALL active alerts.
-    Or with JSON { "alert_id": <int>, "ack_by": "<name>" } for a specific one.
-    """
+    """Acknowledge active alert(s)."""
     body = {}
     if request.is_json:
         body = request.get_json(force=True) or {}
@@ -297,7 +395,6 @@ def api_ack():
     conn = get_db()
     try:
         if alert_id is not None:
-            # Specific alert
             row = conn.execute(
                 'SELECT id FROM alert_log WHERE id=?', (int(alert_id),)
             ).fetchone()
@@ -309,7 +406,6 @@ def api_ack():
             )
             print('[ack] Alert ' + str(alert_id) + ' acknowledged by ' + str(ack_by))
         else:
-            # No alert_id — acknowledge everything active
             conn.execute(
                 'UPDATE alert_log SET acknowledged=1, ack_ts=?, ack_by=? WHERE acknowledged=0',
                 (now_ts, ack_by)
@@ -324,14 +420,7 @@ def api_ack():
 
 @app.route('/api/alert', methods=['POST'])
 def api_inject_alert():
-    """
-    Inject a test alert — use this to verify dashboard + email without a real event.
-
-    curl example:
-        curl -X POST http://192.168.0.208:5000/api/alert \\
-             -H "Content-Type: application/json" \\
-             -d '{"skier_id":"SK01","level":2,"message":"TEST — do not action"}'
-    """
+    """Inject a test alert."""
     body = {}
     if request.is_json:
         body = request.get_json(force=True) or {}
@@ -344,12 +433,17 @@ def api_inject_alert():
 
     conn = get_db()
     try:
+        latest = conn.execute(
+            'SELECT id FROM sessions ORDER BY id DESC LIMIT 1'
+        ).fetchone()
+        session_id = latest['id'] if latest else None
+
         conn.execute('''
             INSERT INTO alert_log
-                (ts, created_epoch, skier_id, level, lat, lon, message,
+                (session_id, ts, created_epoch, skier_id, level, lat, lon, message,
                  acknowledged, escalated, email_sent)
-            VALUES (?,?,?,?,0,0,?,0,0,0)
-        ''', (datetime.now().isoformat(), time.time(), skier_id, level, message))
+            VALUES (?,?,?,?,?,0,0,?,0,0,0)
+        ''', (session_id, datetime.now().isoformat(), time.time(), skier_id, level, message))
         conn.commit()
         print('[test] Injected L' + str(level) + ' alert for ' + skier_id)
         return jsonify({'ok': True, 'skier_id': skier_id, 'level': level})

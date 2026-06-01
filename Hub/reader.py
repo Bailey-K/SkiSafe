@@ -5,6 +5,12 @@ Reads serial output from the hub LoPy4 (receiver_final.py), parses the short-key
 JSON telemetry packets, maps to full field names, inserts into SQLite, and creates
 alert_log entries when the wearable reports a level ≥ 2 event.
 
+Sessions:
+    A new session is opened when reader.py starts, or when no packet has been
+    received for SESSION_GAP_S seconds (default 120).  Every sensor_log and
+    alert_log row carries the current session_id so the review page can show
+    historical sessions independently.
+
 Run: python3 ~/skisafe/reader.py
 
 The hub LoPy4 (via Pytrack USB) prints lines like:
@@ -33,9 +39,10 @@ import sys
 from datetime import datetime
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-SERIAL_PORT = os.environ.get('SKISAFE_PORT', '/dev/ttyACM0')
-SERIAL_BAUD = 115200
-DB_PATH     = os.path.expanduser(os.environ.get('SKISAFE_DB', '~/skisafe/skisafe.db'))
+SERIAL_PORT   = os.environ.get('SKISAFE_PORT', '/dev/ttyACM0')
+SERIAL_BAUD   = 115200
+DB_PATH       = os.path.expanduser(os.environ.get('SKISAFE_DB', '~/skisafe/skisafe.db'))
+SESSION_GAP_S = int(os.environ.get('SESSION_GAP_S', '120'))   # seconds gap → new session
 
 # ── Short-key to full-name map ─────────────────────────────────────────────────
 KEY_MAP = {
@@ -50,19 +57,31 @@ KEY_MAP = {
     'a':  'alert',
 }
 
+# ── Session state ──────────────────────────────────────────────────────────────
+_current_session_id  = None
+_last_packet_epoch   = 0.0
+
+
 # ── Database setup ─────────────────────────────────────────────────────────────
 def init_db(path):
-    """Create tables if they do not exist.  Idempotent — safe to call on every start."""
+    """Create / migrate tables.  Idempotent — safe to call on every start."""
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
-
-    # Enable WAL mode for concurrent access with app.py
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA synchronous=NORMAL')
 
     conn.executescript('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            start_ts     TEXT    NOT NULL,
+            end_ts       TEXT,
+            skier_id     TEXT,
+            start_epoch  REAL    NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS sensor_log (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   INTEGER REFERENCES sessions(id),
             ts           TEXT    NOT NULL,
             skier_id     TEXT,
             packet_count INTEGER,
@@ -79,6 +98,7 @@ def init_db(path):
 
         CREATE TABLE IF NOT EXISTS alert_log (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id    INTEGER REFERENCES sessions(id),
             ts            TEXT    NOT NULL,
             created_epoch REAL    NOT NULL,
             skier_id      TEXT,
@@ -94,13 +114,56 @@ def init_db(path):
         );
     ''')
     conn.commit()
+
+    # ── Migration: add session_id to existing tables if missing ────────────────
+    for tbl in ('sensor_log', 'alert_log'):
+        cols = [r[1] for r in conn.execute('PRAGMA table_info(' + tbl + ')').fetchall()]
+        if 'session_id' not in cols:
+            conn.execute('ALTER TABLE ' + tbl + ' ADD COLUMN session_id INTEGER')
+            conn.commit()
+            print('[db] Migrated ' + tbl + ' — added session_id column')
+
     return conn
 
 
-def get_db():
-    return sqlite3.connect(DB_PATH, timeout=10)
+# ── Session management ─────────────────────────────────────────────────────────
+def get_or_create_session(conn, skier_id):
+    """
+    Return the current session_id.
+    Opens a new session when:
+      - reader.py just started (no session yet), OR
+      - more than SESSION_GAP_S seconds have passed since the last packet.
+    """
+    global _current_session_id, _last_packet_epoch
+
+    now = time.time()
+    gap = now - _last_packet_epoch
+
+    if _current_session_id is None or gap > SESSION_GAP_S:
+        ts = datetime.now().isoformat()
+        cur = conn.execute(
+            'INSERT INTO sessions (start_ts, start_epoch, skier_id) VALUES (?,?,?)',
+            (ts, now, skier_id)
+        )
+        conn.commit()
+        _current_session_id = cur.lastrowid
+        reason = 'first packet' if gap > 9e8 else ('gap of ' + str(int(gap)) + 's')
+        print('[session] New session #' + str(_current_session_id) +
+              ' started for ' + skier_id + ' (' + reason + ')')
+
+    _last_packet_epoch = now
+    return _current_session_id
 
 
+def touch_session(conn, session_id):
+    """Update the session end_ts to now (called after every inserted packet)."""
+    conn.execute(
+        'UPDATE sessions SET end_ts=? WHERE id=?',
+        (datetime.now().isoformat(), session_id)
+    )
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 def make_alert_message(data):
     level = data.get('alert', 0)
     msgs  = []
@@ -113,14 +176,16 @@ def make_alert_message(data):
     return '; '.join(msgs) if msgs else 'Alert level ' + str(level)
 
 
-def insert_reading(conn, data, rssi, snr):
+def insert_reading(conn, data, rssi, snr, session_id):
     """Insert a parsed sensor reading into sensor_log."""
     ts = datetime.now().isoformat()
     conn.execute('''
         INSERT INTO sensor_log
-            (ts, skier_id, packet_count, skin_temp, light, lat, lon, altitude, speed, alert, rssi, snr)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            (session_id, ts, skier_id, packet_count, skin_temp, light,
+             lat, lon, altitude, speed, alert, rssi, snr)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     ''', (
+        session_id,
         ts,
         data.get('skier_id', 'UNKNOWN'),
         data.get('packet_count', 0),
@@ -138,7 +203,7 @@ def insert_reading(conn, data, rssi, snr):
     return ts
 
 
-def maybe_create_alert(conn, data, ts):
+def maybe_create_alert(conn, data, ts, session_id):
     """Create an alert_log row when alert ≥ 2, but only if no open alert already exists."""
     level    = data.get('alert', 0)
     skier_id = data.get('skier_id', 'UNKNOWN')
@@ -146,19 +211,21 @@ def maybe_create_alert(conn, data, ts):
     if level < 2:
         return
 
-    # Check for an existing unacknowledged open alert for this skier
     existing = conn.execute(
-        'SELECT id, level FROM alert_log WHERE skier_id=? AND acknowledged=0 ORDER BY created_epoch DESC LIMIT 1',
-        (skier_id,)
+        '''SELECT id, level FROM alert_log
+           WHERE skier_id=? AND session_id=? AND acknowledged=0
+           ORDER BY created_epoch DESC LIMIT 1''',
+        (skier_id, session_id)
     ).fetchone()
 
     if existing is None:
-        # New alert — create a fresh row
         conn.execute('''
             INSERT INTO alert_log
-                (ts, created_epoch, skier_id, level, lat, lon, message, acknowledged, escalated, email_sent)
-            VALUES (?,?,?,?,?,?,?,0,0,0)
+                (session_id, ts, created_epoch, skier_id, level, lat, lon,
+                 message, acknowledged, escalated, email_sent)
+            VALUES (?,?,?,?,?,?,?,?,0,0,0)
         ''', (
+            session_id,
             ts,
             time.time(),
             skier_id,
@@ -170,7 +237,6 @@ def maybe_create_alert(conn, data, ts):
         conn.commit()
         print('[ALERT] New alert L' + str(level) + ' for ' + skier_id)
     elif level > dict(existing)['level']:
-        # Escalate an existing open alert to higher level
         conn.execute(
             'UPDATE alert_log SET level=?, message=? WHERE id=?',
             (level, make_alert_message(data), dict(existing)['id'])
@@ -192,24 +258,22 @@ def parse_line(line):
     """Extract JSON object from a line, handling 'Received: {...}' prefix."""
     line = line.strip()
     if not line:
-        return None, None, None
+        return None
 
-    # Try to extract JSON — handles 'Received: {...}' or bare '{...}'
     json_str = None
     if line.startswith('Received:'):
         json_str = line[9:].strip()
     elif line.startswith('{'):
         json_str = line
     else:
-        return None, None, None
+        return None
 
     try:
         raw  = json.loads(json_str)
-        data = map_keys(raw)
-        return data, None, None
+        return map_keys(raw)
     except json.JSONDecodeError as e:
         print('[parse error] ' + str(e) + '  raw: ' + json_str[:80])
-        return None, None, None
+        return None
 
 
 def open_serial():
@@ -233,13 +297,13 @@ def open_serial():
 def main():
     print('SkiSafe reader.py starting')
     print('Serial: ' + SERIAL_PORT + '  DB: ' + DB_PATH)
+    print('Session gap: ' + str(SESSION_GAP_S) + 's')
 
     conn = init_db(DB_PATH)
     ser  = open_serial()
 
-    rssi      = None
-    snr       = None
-    last_data = None   # carry over RSSI/SNR parsed before the JSON line
+    rssi = None
+    snr  = None
 
     try:
         while True:
@@ -261,7 +325,6 @@ def main():
             if not line:
                 continue
 
-            # RSSI / SNR lines from receiver_final.py
             if line.startswith('RSSI:'):
                 try:
                     rssi = int(line.split(':')[1].strip())
@@ -275,29 +338,28 @@ def main():
                     pass
                 continue
 
-            # JSON data line
-            data, _, _ = parse_line(line)
+            data = parse_line(line)
             if data is None:
-                # Print non-JSON lines as debug (remove if too noisy)
                 if line and not line.startswith('#'):
                     print('[hub] ' + line)
                 continue
 
-            # Validate required fields
             if 'skier_id' not in data:
                 print('[skip] no skier_id in: ' + str(data))
                 rssi = None; snr = None
                 continue
 
-            ts = insert_reading(conn, data, rssi, snr)
-            maybe_create_alert(conn, data, ts)
+            session_id = get_or_create_session(conn, data['skier_id'])
+            ts         = insert_reading(conn, data, rssi, snr, session_id)
+            touch_session(conn, session_id)
+            maybe_create_alert(conn, data, ts, session_id)
 
-            print('RX ' + str(data.get('skier_id')) +
+            print('[S' + str(session_id) + '] RX ' + str(data.get('skier_id')) +
                   '  alert=' + str(data.get('alert', 0)) +
-                  '  skin=' + str(data.get('skin_temp', '?')) + 'C' +
-                  '  lux=' + str(data.get('light', '?')) +
+                  '  skin='  + str(data.get('skin_temp', '?')) + 'C' +
+                  '  lux='   + str(data.get('light', '?')) +
                   ('  RSSI=' + str(rssi) if rssi else '') +
-                  ('  SNR=' + str(snr) if snr else ''))
+                  ('  SNR='  + str(snr)  if snr  else ''))
 
             rssi = None
             snr  = None

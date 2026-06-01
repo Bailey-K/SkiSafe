@@ -251,14 +251,30 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 // ═══════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════
-const POLL_MS   = 5000;
-const TRAIL_MAX = 200;
+const POLL_MS        = 5000;
+const TRAIL_MAX      = 200;
+const STORAGE_KEY    = 'skisafe_trail';
+const SESSION_KEY    = 'skisafe_session_id';
 
-let gpsTrail   = [];
-let followMode = true;
-let headingDeg = 0;
-let prevAlt    = null;
-let lastAlerts = [];
+let gpsTrail      = [];
+let followMode    = true;
+let headingDeg    = 0;
+let prevAlt       = null;
+let lastAlerts    = [];
+let activeSession = null;   // session_id of the current live session
+
+// ── Restore trail from localStorage if session matches ──────────────────────
+(function restoreTrail() {
+  try {
+    const storedSession = localStorage.getItem(SESSION_KEY);
+    const storedTrail   = localStorage.getItem(STORAGE_KEY);
+    if (storedSession && storedTrail) {
+      // We'll compare against the first /api/state response in poll().
+      // Park the data; apply only if session matches.
+      window._pendingRestore = { session: storedSession, trail: JSON.parse(storedTrail) };
+    }
+  } catch (e) { /* ignore */ }
+})();
 
 // ═══════════════════════════════════════════════════════
 // LEAFLET MAP SETUP
@@ -346,6 +362,45 @@ async function poll() {
     const state  = await sr.json();
     const alerts = ar.ok ? await ar.json() : [];
     lastAlerts = alerts;
+
+    // ── Session change detection ──────────────────────────────────────────────
+    const incomingSession = state.session_id != null ? String(state.session_id) : null;
+
+    if (incomingSession && activeSession === null) {
+      // First poll — check if we can restore a saved trail for this session
+      if (window._pendingRestore && window._pendingRestore.session === incomingSession) {
+        const pts = window._pendingRestore.trail;
+        if (pts && pts.length > 0) {
+          gpsTrail = pts;
+          // Replay trail onto map
+          trailLine.setLatLngs(gpsTrail.map(p => [p.lat, p.lon]));
+          const last = gpsTrail[gpsTrail.length - 1];
+          if (!skierMarker) {
+            skierMarker = L.marker([last.lat, last.lon], {icon: skierIcon, zIndexOffset: 1000}).addTo(map);
+          } else {
+            skierMarker.setLatLng([last.lat, last.lon]);
+          }
+          if (followMode) map.setView([last.lat, last.lon], map.getZoom() < 14 ? 15 : map.getZoom());
+          document.getElementById('noFixOverlay').classList.add('hidden');
+          document.getElementById('ts-pts').textContent = gpsTrail.length;
+        }
+      }
+      activeSession = incomingSession;
+      window._pendingRestore = null;
+    } else if (incomingSession && activeSession !== null && incomingSession !== activeSession) {
+      // Session changed — wipe trail and start fresh
+      console.log('Session changed from', activeSession, '→', incomingSession, '— clearing trail');
+      gpsTrail = [];
+      trailLine.setLatLngs([]);
+      alertMarkers.clearLayers();
+      if (skierMarker) { map.removeLayer(skierMarker); skierMarker = null; }
+      prevAlt = null;
+      document.getElementById('ts-pts').textContent = '0';
+      document.getElementById('noFixOverlay').classList.remove('hidden');
+      activeSession = incomingSession;
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SESSION_KEY);
+    }
 
     if (state.lat && state.lat !== 0 && state.lon && state.lon !== 0) {
       pushTrailPoint(state.lat, state.lon, state.altitude || state.alt || 0, state.speed || 0);
@@ -496,6 +551,14 @@ function pushTrailPoint(lat, lon, alt, spd) {
     map.setView(pos, map.getZoom() < 14 ? 15 : map.getZoom());
   }
 
+  // Persist trail to localStorage so navigation doesn't wipe it
+  if (activeSession) {
+    try {
+      localStorage.setItem(SESSION_KEY, activeSession);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(gpsTrail));
+    } catch (e) { /* quota exceeded — ignore */ }
+  }
+
   // Hide "no fix" overlay
   document.getElementById('noFixOverlay').classList.add('hidden');
 
@@ -565,6 +628,7 @@ function clearTrack() {
   if (skierMarker) { map.removeLayer(skierMarker); skierMarker = null; }
   document.getElementById('ts-pts').textContent = '0';
   document.getElementById('noFixOverlay').classList.remove('hidden');
+  try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SESSION_KEY); } catch (e) {}
 }
 
 // ═══════════════════════════════════════════════════════
