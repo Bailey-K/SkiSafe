@@ -27,3 +27,6 @@ launch.bat
 # Local project docs (machine-generated, not for repo)
 SKISAFE_PROJECT_KNOWLEDGE.md
 SKISAFE_REMAINING.md
+
+# Local push script
+push_to_github.ps1
