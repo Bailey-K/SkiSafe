@@ -6,12 +6,6 @@ venv/
 .env
 config.json
 
-# Arduino / PlatformIO
-.pio/
-build/
-*.hex
-*.elf
-
 # Databases
 *.db
 *.sqlite3
@@ -20,10 +14,5 @@ build/
 .DS_Store
 Thumbs.db
 
-# Local Automation Shortcuts
-launch.bat
+# Local automation shortcuts
 *.bat
-
-# Local project docs (machine-generated, not for repo)
-SKISAFE_PROJECT_KNOWLEDGE.md
-SKISAFE_REMAINING.md

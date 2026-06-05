@@ -1,1 +1,3 @@
-Flask\nngrok\npyserial\n
+Flask
+pyserial
+ngrok

@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """
 SkiSafe — reader.py
-Reads serial output from the hub LoPy4 (receiver_final.py), parses the short-key
+Reads serial output from the hub LoPy4 (receiver.py), parses the short-key
 JSON telemetry packets, maps to full field names, inserts into SQLite, and creates
 alert_log entries when the wearable reports a level ≥ 2 event.
 
+Changes from reader.py:
+  • Added 'bt' -> 'battery_pct' to KEY_MAP
+  • Added battery_pct REAL column to sensor_log (CREATE TABLE + migration)
+  • insert_reading() now writes battery_pct
+  • Console RX line includes battery percentage
+
 Sessions:
-    A new session is opened when reader.py starts, or when no packet has been
-    received for SESSION_GAP_S seconds (default 120).  Every sensor_log and
+    A new session is opened when reader.py starts, or when no packet
+    has been received for SESSION_GAP_S seconds (default 120).  Every sensor_log and
     alert_log row carries the current session_id so the review page can show
     historical sessions independently.
 
 Run: python3 ~/skisafe/reader.py
 
 The hub LoPy4 (via Pytrack USB) prints lines like:
-    Received: {"i":"SK01","c":5,"st":20.3,"lx":240,"la":-37.84,"lo":144.96,"al":523,"sp":12.3,"a":2}
+    Received: {"i":"SK01","c":5,"st":20.3,"lx":240,"la":-37.84,"lo":144.96,"al":523,"sp":12.3,"bt":87,"a":0}
     RSSI: -72
     SNR: 8.5
 
@@ -27,7 +33,8 @@ Short-key → full-name mapping (must match wearable firmware):
     lo = lon             (float)
     al = altitude        (float, metres)
     sp = speed           (float, km/h)
-    a  = alert           (int, 0–3)
+    bt = battery_pct     (int, 0-100)
+    a  = alert           (int, 0-3)
 """
 
 import serial
@@ -54,6 +61,7 @@ KEY_MAP = {
     'lo': 'lon',
     'al': 'altitude',
     'sp': 'speed',
+    'bt': 'battery_pct',
     'a':  'alert',
 }
 
@@ -93,7 +101,8 @@ def init_db(path):
             speed        REAL,
             alert        INTEGER DEFAULT 0,
             rssi         INTEGER,
-            snr          REAL
+            snr          REAL,
+            battery_pct  REAL
         );
 
         CREATE TABLE IF NOT EXISTS alert_log (
@@ -115,13 +124,22 @@ def init_db(path):
     ''')
     conn.commit()
 
-    # ── Migration: add session_id to existing tables if missing ────────────────
-    for tbl in ('sensor_log', 'alert_log'):
-        cols = [r[1] for r in conn.execute('PRAGMA table_info(' + tbl + ')').fetchall()]
-        if 'session_id' not in cols:
-            conn.execute('ALTER TABLE ' + tbl + ' ADD COLUMN session_id INTEGER')
-            conn.commit()
-            print('[db] Migrated ' + tbl + ' — added session_id column')
+    # ── Migration: add missing columns to existing tables ─────────────────────
+    cols = [r[1] for r in conn.execute('PRAGMA table_info(sensor_log)').fetchall()]
+    if 'session_id' not in cols:
+        conn.execute('ALTER TABLE sensor_log ADD COLUMN session_id INTEGER')
+        conn.commit()
+        print('[db] Migrated sensor_log — added session_id column')
+    if 'battery_pct' not in cols:
+        conn.execute('ALTER TABLE sensor_log ADD COLUMN battery_pct REAL')
+        conn.commit()
+        print('[db] Migrated sensor_log — added battery_pct column')
+
+    cols_al = [r[1] for r in conn.execute('PRAGMA table_info(alert_log)').fetchall()]
+    if 'session_id' not in cols_al:
+        conn.execute('ALTER TABLE alert_log ADD COLUMN session_id INTEGER')
+        conn.commit()
+        print('[db] Migrated alert_log — added session_id column')
 
     return conn
 
@@ -182,8 +200,8 @@ def insert_reading(conn, data, rssi, snr, session_id):
     conn.execute('''
         INSERT INTO sensor_log
             (session_id, ts, skier_id, packet_count, skin_temp, light,
-             lat, lon, altitude, speed, alert, rssi, snr)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             lat, lon, altitude, speed, alert, rssi, snr, battery_pct)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ''', (
         session_id,
         ts,
@@ -198,6 +216,7 @@ def insert_reading(conn, data, rssi, snr, session_id):
         data.get('alert', 0),
         rssi,
         snr,
+        data.get('battery_pct', None),
     ))
     conn.commit()
     return ts
@@ -354,10 +373,12 @@ def main():
             touch_session(conn, session_id)
             maybe_create_alert(conn, data, ts, session_id)
 
+            bat_str = str(data.get('battery_pct', '?')) + '%'
             print('[S' + str(session_id) + '] RX ' + str(data.get('skier_id')) +
                   '  alert=' + str(data.get('alert', 0)) +
                   '  skin='  + str(data.get('skin_temp', '?')) + 'C' +
                   '  lux='   + str(data.get('light', '?')) +
+                  '  bat='   + bat_str +
                   ('  RSSI=' + str(rssi) if rssi else '') +
                   ('  SNR='  + str(snr)  if snr  else ''))
 

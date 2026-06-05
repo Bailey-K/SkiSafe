@@ -1,4 +1,4 @@
-# SkiSafe — receiver_final.py
+# SkiSafe — receiver.py
 # Hub LoPy4 (in Pytrack board) — LoRa receiver / serial bridge.
 # Receives packets from the wearable and prints them to serial (USB)
 # so reader.py on the Pi can parse them.
@@ -9,10 +9,10 @@
 #   SNR: 8.5
 #
 # Flash from Pi:
-#   uvx mpremote connect /dev/ttyACM0 cp receiver_final.py :main.py + reset
+#   uvx mpremote connect /dev/ttyACM0 cp receiver.py :main.py + reset
 #
 # CRITICAL: recv buffer must be >= max packet size.
-# GPS packets from wearable_final.py are ~95 bytes.
+# GPS packets from wearable.py are ~95 bytes.
 # recv(64) splits them across two reads → parse errors on Pi.
 # recv(256) handles any realistic LoRa payload size.
 
