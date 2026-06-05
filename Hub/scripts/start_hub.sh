@@ -1,9 +1,5 @@
 #!/bin/bash
 
-echo "Updating SkiSafe..."
-
-~/update-skisafe.sh
-
 echo "Killing old hub session..."
 tmux kill-session -t hub 2>/dev/null
 
