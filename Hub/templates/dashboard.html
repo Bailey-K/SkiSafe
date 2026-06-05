@@ -58,8 +58,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .ack-btn:disabled { opacity: 0.3; cursor: default; }
 
 /* ── Sensor grid ── */
-.sensor-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
-@media (max-width: 720px) { .sensor-grid { grid-template-columns: repeat(2, 1fr); } }
+.sensor-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
+@media (max-width: 900px) { .sensor-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 560px) { .sensor-grid { grid-template-columns: repeat(2, 1fr); } }
 .sensor-card { background: var(--surface); border-radius: var(--radius); padding: 14px 14px 10px; box-shadow: var(--shadow); border-left: 4px solid transparent; transition: border-color 0.3s; }
 .sensor-card.ok   { border-left-color: var(--ok); }
 .sensor-card.warn { border-left-color: var(--warn); }
@@ -183,6 +184,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <div class="sensor-value" id="val-speed">--<span class="unit">km/h</span></div>
       <div class="sensor-sub" id="sub-speed">NEO-6M GPS</div>
       <div class="sensor-tag tag-grey" id="tag-speed">—</div>
+    </div>
+    <div class="sensor-card grey" id="card-batt">
+      <div class="sensor-icon">🔋</div>
+      <div class="sensor-label">Battery</div>
+      <div class="sensor-value" id="val-batt">--<span class="unit">%</span></div>
+      <div class="sensor-sub" id="sub-batt">LiPo · P15</div>
+      <div class="sensor-tag tag-grey" id="tag-batt">—</div>
     </div>
   </div>
 
@@ -473,6 +481,16 @@ function renderState(s, alerts) {
     spd > 60     ? {cls:'warn', tag:'HIGH SPEED',tagCls:'tag-warn', sub:'Above 60 km/h'} :
     spd > 0      ? {cls:'blue', tag:'MOVING',    tagCls:'tag-blue', sub:'Active skiing'} :
                    {cls:'grey', tag:'STOPPED',   tagCls:'tag-grey', sub:'Stationary'}
+  );
+
+  // ── Battery ──
+  const bat = s.battery_pct;
+  setCard('batt',
+    (bat != null ? Math.round(bat) : '--') + '<span class="unit">%</span>',
+    bat == null  ? {cls:'grey', tag:'No data',     tagCls:'tag-grey', sub:'LiPo · P15'} :
+    bat < 20     ? {cls:'crit', tag:'CRITICAL',    tagCls:'tag-crit', sub:'Charge immediately'} :
+    bat < 40     ? {cls:'warn', tag:'LOW',          tagCls:'tag-warn', sub:'Battery running low'} :
+                   {cls:'ok',   tag:'GOOD',          tagCls:'tag-ok',   sub:'Charge level OK'}
   );
 
   renderAlertLog(alerts);
