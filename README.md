@@ -19,24 +19,30 @@ Wearable (LoPy4)
 ```
 
 ### Wearable Node
+
 Pycom LoPy4 standalone (no expansion board), battery-powered via Adafruit PowerBoost 1000C. Reads sensors every loop and transmits a JSON packet over LoRa every 5 seconds (2 seconds at alert level 2+).
 
 **Sensors:**
+
 - MPU-6050 IMU — fall detection and immobility monitoring
 - BH1750 light sensor — burial detection (sudden darkness after fall)
 - NTC thermistor — skin temperature / hypothermia risk
 - u-blox NEO-6M GPS — coordinates, speed, altitude
 
 **Outputs:**
+
 - RGB LEDs (alert state indicator)
 - Passive piezo buzzer (alert audio)
 - Tactile button (local alert dismiss)
 
 ### Hub Node
+
 Pycom LoPy4 in a Pytrack expansion board, connected via USB to the Raspberry Pi. Runs `receiver.py` — listens for LoRa packets and prints them to serial.
 
 ### Raspberry Pi
+
 Runs two processes (managed via tmux):
+
 - `reader.py` — reads serial from the hub LoPy4, parses JSON telemetry, writes to SQLite
 - `app.py` — Flask web dashboard served locally (and optionally via ngrok tunnel)
 
@@ -44,11 +50,11 @@ Runs two processes (managed via tmux):
 
 ## Alert Levels
 
-| Level | Trigger | Response |
-|-------|---------|----------|
-| **L0** | Normal | Green LED steady, silent |
-| **L1** | Low battery / cold skin / immobility 30s | Yellow LED, short pip every 2s |
-| **L2** | Fall detected / immobility 60s | Red LED, urgent beep, dashboard warning |
+| Level  | Trigger                                           | Response                                           |
+| ------ | ------------------------------------------------- | -------------------------------------------------- |
+| **L0** | Normal                                            | Green LED steady, silent                           |
+| **L1** | Low battery / cold skin / immobility 30s          | Yellow LED, short pip every 2s                     |
+| **L2** | Fall detected / immobility 60s                    | Red LED, urgent beep, dashboard warning            |
 | **L3** | L2 unacknowledged for 60s / burial / extreme cold | SOS flash + rapid beep, dashboard SOS, email alert |
 
 Button press or hub ACK clears the buzzer and fall latch at any level.
@@ -60,7 +66,7 @@ Button press or hub ACK clears the buzzer and fall latch at any level.
 ```
 ├── Wearable/
 │   ├── wearable.py                   # Production firmware (flash as main.py)
-│   └── Code/Component-Testing/
+│   └── Component-Testing/
 │       ├── hardware_test.py          # Full bring-up validation (PASS/FAIL/WARN)
 │       ├── bh1750_test.py
 │       ├── mpu6050_test.py
@@ -97,11 +103,13 @@ Button press or hub ACK clears the buzzer and fall latch at any level.
 ## Flash Commands
 
 **Wearable firmware:**
+
 ```
 uvx mpremote connect COM10 cp Wearable/wearable.py :main.py + reset + repl
 ```
 
 **Hub receiver (one-time, run from project root):**
+
 ```
 uvx mpremote connect /dev/ttyACM0 cp Hub/receiver.py :main.py + reset
 ```

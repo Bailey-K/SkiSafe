@@ -514,21 +514,18 @@ def read_battery():
     Read battery voltage and charge percentage via voltage divider on P15.
     Circuit: LiPo+ -> 100k -> P15 -> 100k -> GND  =>  V_P15 = V_bat / 2.
 
-    Formula proven by Full-Hardware_Test.py test_battery():
-      v_pin = raw / 4095.0 * 3.3
-      v_bat = v_pin * 2.0
-
-    Averages 4 samples (adds ~8 ms).  Called on TX cadence only.
+    Averages 16 samples to suppress ADC noise (adds ~32 ms).
+    Called on TX cadence only.
 
     Returns (voltage_volts, percent_int).
     Returns (0.0, 0) when the reading is outside the plausible 3.0-4.3 V range
     (e.g. no cell connected, or USB power only).
     """
     total = 0
-    for _ in range(4):
+    for _ in range(16):
         total += _batt_ch.value()
         utime.sleep_ms(2)
-    raw   = total >> 2
+    raw   = total >> 4              # divide by 16
     v_pin = raw / ADC_FULL_SCALE * ADC_VREF
     v_bat = v_pin * BATT_DIVIDER
 
@@ -884,6 +881,8 @@ _cached_alt    = 0.0
 _cached_speed  = 0.0
 _cached_batt_v = 0.0
 _cached_batt_p = 100               # Assume full until first ADC read
+_batt_ema_p    = -1.0              # EMA of battery %; -1 = not yet initialised
+BATT_EMA_ALPHA = 0.15              # Smoothing factor (lower = smoother, slower)
 
 # ── Button debounce state ─────────────────────────────────────────────────────
 _btn_last     = 1                   # Idle HIGH (PULL_UP, active LOW)
@@ -938,8 +937,14 @@ while True:
         _cached_alt   = _avg(_alt_buf)   if _alt_buf   else 0.0
         _cached_speed = _avg(_speed_buf) if _speed_buf else 0.0
 
-        # Battery
-        _cached_batt_v, _cached_batt_p = read_battery()
+        # Battery — 16-sample average + EMA to suppress ADC noise and load spikes
+        _cached_batt_v, raw_batt_p = read_battery()
+        if raw_batt_p > 0:
+            if _batt_ema_p < 0.0:
+                _batt_ema_p = float(raw_batt_p)   # seed EMA on first valid read
+            else:
+                _batt_ema_p = BATT_EMA_ALPHA * raw_batt_p + (1.0 - BATT_EMA_ALPHA) * _batt_ema_p
+            _cached_batt_p = int(_batt_ema_p)
 
     # ── 4. Button — debounce and dismiss ─────────────────────────────────────
     btn_raw = button()
